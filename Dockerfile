@@ -13,4 +13,6 @@ COPY openvpn.sh /usr/bin/
 
 VOLUME ["/vpn"]
 
-ENTRYPOINT ["openvpn.sh"]
+WORKDIR /vpn
+
+ENTRYPOINT ["/usr/bin/openvpn.sh"]
