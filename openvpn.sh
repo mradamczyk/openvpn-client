@@ -18,18 +18,6 @@
 
 set -o nounset                              # Treat unset variables as an error
 
-### dns: setup openvpn client DNS
-# Arguments:
-#   none)
-# Return: conf file that uses VPN provider's DNS resolvers
-dns() { local conf="/vpn/vpn.conf"
-
-    echo "# This updates the resolvconf with dns settings" >>$conf
-    echo "script-security 2" >>$conf
-    echo "up /etc/openvpn/update-resolv-conf" >>$conf
-    echo "down /etc/openvpn/update-resolv-conf" >>$conf
-}
-
 ### firewall: firewall all output not DNS/VPN that's not over the VPN
 # Arguments:
 #   none)
@@ -58,9 +46,9 @@ return_route() { local gw network="$1"
 
 ### timezone: Set the timezone for the container
 # Arguments:
-#   timezone) for example EST5EDT
+#   timezone) for example Europe/Warsaw
 # Return: the correct zoneinfo file will be symlinked into place
-timezone() { local timezone="${1:-EST5EDT}"
+timezone() { local timezone="${1:-Europe/Warsaw}"
     [[ -e /usr/share/zoneinfo/$timezone ]] || {
         echo "ERROR: invalid timezone specified: $timezone" >&2
         return
@@ -71,40 +59,6 @@ timezone() { local timezone="${1:-EST5EDT}"
         ln -sf /usr/share/zoneinfo/$timezone /etc/localtime
         dpkg-reconfigure -f noninteractive tzdata >/dev/null 2>&1
     fi
-}
-
-### vpn: setup openvpn client
-# Arguments:
-#   server) VPN GW server
-#   user) user name on VPN
-#   pass) password on VPN
-# Return: configured .ovpn file
-vpn() { local server="$1" user="$2" pass="$3" \
-            conf="/vpn/vpn.conf" auth="/vpn/vpn.auth"
-
-    cat >$conf <<-EOF
-		client
-		dev tun
-		proto udp
-		remote $server 1194
-		resolv-retry infinite
-		nobind
-		persist-key
-		persist-tun
-		ca /vpn/vpn-ca.crt
-		tls-client
-		remote-cert-tls server
-		auth-user-pass
-		comp-lzo
-		verb 1
-		reneg-sec 0
-		redirect-gateway def1
-		auth-user-pass $auth
-		EOF
-
-    echo "$user" >$auth
-    echo "$pass" >>$auth
-    chmod 0600 $auth
 }
 
 ### usage: Help
@@ -124,25 +78,19 @@ Options (fields in '[]' are optional, '<>' are required):
                 <network> add a route to (allows replies once the VPN is up)
     -t \"\"       Configure timezone
                 possible arg: \"[timezone]\" - zoneinfo timezone for container
-    -v '<server;user;password>' Configure OpenVPN
-                required arg: \"<server>;<user>;<password>\"
-                <server> to connect to
-                <user> to authenticate as
-                <password> to authenticate with
 
 The 'command' (if provided and valid) will be run instead of openvpn
 " >&2
     exit $RC
 }
 
-while getopts ":hdfr:t:v:" opt; do
+while getopts ":hdfr:t:" opt; do
     case "$opt" in
         h) usage ;;
         d) DNS=true ;;
         f) firewall; touch /vpn/.firewall ;;
         r) return_route "$OPTARG" ;;
         t) timezone "$OPTARG" ;;
-        v) eval vpn $(sed 's/^\|$/"/g; s/;/" "/g' <<< $OPTARG) ;;
         "?") echo "Unknown option: -$OPTARG"; usage 1 ;;
         ":") echo "No argument value for option: -$OPTARG"; usage 2 ;;
     esac
@@ -164,6 +112,5 @@ elif ps -ef | egrep -v 'grep|openvpn.sh' | grep -q openvpn; then
     echo "Service already running, please restart container to apply changes"
 else
     [[ -e /vpn/vpn.conf ]] || { echo "ERROR: VPN not configured!"; sleep 120; }
-    [[ -e /vpn/vpn-ca.crt ]] || { echo "ERROR: VPN cert missing!"; sleep 120; }
     exec sg vpn -c "openvpn --config /vpn/vpn.conf"
 fi
